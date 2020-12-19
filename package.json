@@ -1,0 +1,23 @@
+{
+  "name": "discordrainbow",
+  "version": "1.0.0",
+  "description": "Make user colors rainbow in Discord!",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yummypasta/DiscordRainbow.git"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/yummypasta/DiscordRainbow/issues"
+  },
+  "homepage": "https://github.com/yummypasta/DiscordRainbow#readme",
+  "dependencies": {
+    "discord.js": "^12.5.1",
+    "firebase-admin": "^9.4.2"
+  }
+}
