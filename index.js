@@ -6,7 +6,7 @@ const serviceAccount = require("./firebase_key.json");
 
 firebase.initializeApp({
     credential: firebase.credential.cert(serviceAccount),
-    databaseURL: "https://discord-rainbow.firebaseio.com"
+    databaseURL: secrets.firebaseConfig.databaseURL
 });
 
 const prefix = "r!";
