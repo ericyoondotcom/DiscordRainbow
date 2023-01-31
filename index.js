@@ -5,8 +5,7 @@ const secrets = require("./secrets");
 const serviceAccount = require("./firebase_key.json");
 
 firebase.initializeApp({
-    credential: firebase.credential.cert(serviceAccount),
-    databaseURL: secrets.firebaseConfig.databaseURL
+    credential: firebase.credential.cert(serviceAccount)
 });
 
 const prefix = "r!";
@@ -27,6 +26,7 @@ bot.login(secrets.discordToken);
 
 bot.on("ready", () => {
     bot.user.setActivity(prefix + "help");
+    console.log("Bot running!");
 });
 
 bot.on("message", async (msg) => {
