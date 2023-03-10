@@ -9,7 +9,7 @@ firebase.initializeApp({
 });
 
 const prefix = "r!";
-const rolePrefix = "🌈 ";
+const rolePrefix = "RainbowRoles ";
 
 let bot = new Discord.Client();
 let firestore = firebase.firestore();
@@ -17,6 +17,8 @@ let firestore = firebase.firestore();
 const defaultData = {
     colorSaturation: 1,
     colorValue: 1,
+    colorHueStart: 0,
+    colorHueEnd: 1,
     respectHoists: true,
     includeBots: true,
     maxRoleCount: 0
@@ -49,74 +51,11 @@ bot.on("message", async (msg) => {
     } else if(command == "invite"){
         msg.channel.send(`Invite Rainbow Roles to your own server!\n> https://discord.com/oauth2/authorize?scope=bot&client_id=789673374031937556&permissions=268503040`);
     } else if(command == "apply"){
-        if(!msg.member.hasPermission("ADMINISTRATOR")){
-            msg.channel.send("❌ Only server administrators can use this command.");
-            return;
-        }
-        msg.channel.send("⌛ Applying roles. This may take a moment...");
-        const data = await fetchGuildData(msg.guild.id);
-        if(data == null){
-            msg.channel.send("❌ Configuration options could not be fetched from Rainbow Roles server. Please try again later.");
-            return;
-        }
-        msg.channel.send("ℹ️ Fetched configuration options. Creating roles...");
-        let members = (await msg.guild.members.fetch()).array();
-        
-        if(!data.includeBots){
-            members = members.filter(i => !i.user.bot);
-        }
-        const sortedMembers = members.sort((a, b) => 
-            memberSortLambda(a, b, data.respectHoists)
-        );
-        // console.log(sortedMembers.map(i => i.displayName));
-        let existingRoles = (await msg.guild.roles.fetch()).cache.array();
-        existingRoles = existingRoles.filter(role => role.client.user.id == bot.user.id && role.name.startsWith(rolePrefix));
-
-        let roles = {};
-        for(let role of existingRoles){
-            roles[parseInt(role.name.replace(rolePrefix, ""))] = role;
-        }
-
-        const roleCount = (data.maxRoleCount <= 0 ? sortedMembers.length : (Math.min(data.maxRoleCount, sortedMembers.length)));
-        let rolePosition = msg.guild.me.roles.highest.position - 1;
-        for(let i = 0; i < roleCount; i++){
-            const rgb = HSVtoRGB((i / roleCount), data.colorSaturation, data.colorValue);
-            if(i in roles){
-                await roles[i].setPosition(rolePosition);
-                await roles[i].setColor([rgb.r, rgb.g, rgb.b]);
-            }else{
-                roles[i] = await msg.guild.roles.create({
-                    data: {
-                        name: rolePrefix + i.toString(),
-                        color: [rgb.r, rgb.g, rgb.b],
-                        position: rolePosition
-                    },
-                    reason: "Rainbow Roles apply command"
-                });
-            }
-        }
-        msg.channel.send("ℹ️ Created roles. Assigning to users...");
-        const allRoles = Object.values(roles);
-        for(let i in sortedMembers){
-            const member = sortedMembers[i];
-            await member.roles.remove(allRoles);
-            const roleIdx = data.maxRoleCount <= 0 ? i : Math.floor(i / sortedMembers.length * roleCount);
-            await member.roles.add(roles[roleIdx]);
-        }
-        msg.channel.send("✅ Done!\n> Not working? Make sure this bot's highest role is on top and try again.");
-
+        applyRoles(msg);
+        return;
     } else if(command == "cleanup"){
-        if(!msg.member.hasPermission("ADMINISTRATOR")){
-            msg.channel.send("❌ Only server administrators can use this command.");
-            return;
-        }
-        let existingRoles = (await msg.guild.roles.fetch()).cache.array();
-        existingRoles = existingRoles.filter(role => role.client.user.id == bot.user.id && role.name.startsWith(rolePrefix));
-        msg.channel.send("⌛ Deleting all Rainbow Roles. This may take a moment...");
-        await Promise.all(
-            existingRoles.map(role => role.delete("Rainbow Roles cleanup command"))
-        );
-        msg.channel.send("✅ Done!");
+        cleanup(msg);
+        return;
     } else if(command == "config"){
         if(!msg.member.hasPermission("ADMINISTRATOR")){
             msg.channel.send("❌ Only server administrators can use this command.");
@@ -128,6 +67,8 @@ bot.on("message", async (msg) => {
                 "Configuration options:\n" +
                 "> `saturation`: The saturation, as a percentage from 0-100, of the role colors.\n" +
                 "> `value`: The value (darkness), as a percentage from 0-100, of the role colors.\n" +
+                "> `huestart`: The starting hue, as a degree from 0-360, that the rainbow will start at.\n" +
+                "> `hueend`: The ending hue, as a degree from 0-360, the the rainbow will end at.\n" +
                 "> `maxroles`: (integer) the max number of roles to create. Set to `0` to not limit the number of roles. The higher this number, the smoother the gradient will be.\n" +
                 "> `respecthoists`: set to `true` to take hoisted roles into account, otherwise set to `false`.\n" +
                 "> `includebots`: set to `true` to assign bots rainbow roles, otherwise set to `false`.\n"
@@ -157,6 +98,24 @@ bot.on("message", async (msg) => {
             }
             await updateGuildData(msg.guild.id, {
                 colorValue: v / 100
+            });
+        } else if(subcommand == "huestart"){
+            let v = parseFloat(value.replace("%", ""));
+            if(isNaN(v) || v < 0 || v > 360){
+                msg.channel.send("❌ Value must be a number between 0 and 360.");
+                return;
+            }
+            await updateGuildData(msg.guild.id, {
+                colorHueStart: v / 360
+            });
+        } else if(subcommand == "hueend"){
+            let v = parseFloat(value.replace("%", ""));
+            if(isNaN(v) || v < 0 || v > 360){
+                msg.channel.send("❌ Value must be a number between 0 and 360.");
+                return;
+            }
+            await updateGuildData(msg.guild.id, {
+                colorHueEnd: v / 360
             });
         } else if(subcommand == "maxroles"){
             let v = parseInt(value);
@@ -193,6 +152,98 @@ bot.on("message", async (msg) => {
     }
 });
 
+async function applyRoles(msg) {
+    if(!msg.member.hasPermission("ADMINISTRATOR")){
+        msg.channel.send("❌ Only server administrators can use this command.");
+        return;
+    }
+    msg.channel.send("⌛ Applying roles. This may take a moment...");
+    const data = await fetchGuildData(msg.guild.id);
+    if(data == null){
+        msg.channel.send("❌ Configuration options could not be fetched from Rainbow Roles server. Please try again later.");
+        return;
+    }
+    msg.channel.send("ℹ️ Fetched configuration options. Creating roles...");
+    let members = (await msg.guild.members.fetch()).array();
+    
+    if(!data.includeBots){
+        members = members.filter(i => !i.user.bot);
+    }
+    const sortedMembers = members.sort((a, b) => 
+        memberSortLambda(a, b, data.respectHoists)
+    );
+    let existingRoles = (await msg.guild.roles.fetch()).cache.array();
+    existingRoles = existingRoles.filter(role => role.client.user.id == bot.user.id && role.name.startsWith(rolePrefix));
+
+    let roles = {};
+    for(let role of existingRoles){
+        roles[parseInt(role.name.replace(rolePrefix, ""))] = role;
+    }
+
+    const roleCount = (data.maxRoleCount <= 0 ? sortedMembers.length : (Math.min(data.maxRoleCount, sortedMembers.length)));
+    let rolePosition = msg.guild.me.roles.highest.position - 1;
+    try {
+        for(let i = 0; i < roleCount; i++){
+            const hueStart = Math.min(data.colorHueStart, data.colorHueEnd);
+            const hueEnd = Math.max(data.colorHueStart, data.colorHueEnd);
+            const hue = hueStart + (hueEnd - hueStart) * (i / roleCount);
+            const rgb = HSVtoRGB(hue, data.colorSaturation, data.colorValue);
+            if(i in roles){
+                await roles[i].setPosition(rolePosition);
+                await roles[i].setColor([rgb.r, rgb.g, rgb.b]);
+            }else{
+                roles[i] = await msg.guild.roles.create({
+                    data: {
+                        name: rolePrefix + i.toString(),
+                        color: [rgb.r, rgb.g, rgb.b],
+                        position: rolePosition
+                    },
+                    reason: "Rainbow Roles apply command"
+                });
+            }
+        }
+    } catch(e) {
+        console.error(e);
+        msg.channel.send("❌ Could not create roles. Try again later.");
+        return;
+    }
+    msg.channel.send("ℹ️ Created roles. Assigning to users...");
+    const allRoles = Object.values(roles);
+    try {
+        for(let i in sortedMembers){
+            const member = sortedMembers[i];
+            await member.roles.remove(allRoles);
+            const roleIdx = data.maxRoleCount <= 0 ? i : Math.floor(i / sortedMembers.length * roleCount);
+            await member.roles.add(roles[roleIdx]);
+        }
+    } catch(e) {
+        console.error(e);
+        msg.channel.send("❌ Could not assign roles. Try again later.");
+        return;
+    }
+    msg.channel.send("✅ Done!\n> Not working? Make sure this bot's highest role is on top and try again.");
+}
+
+async function cleanup(msg) {
+    if(!msg.member.hasPermission("ADMINISTRATOR")){
+        msg.channel.send("❌ Only server administrators can use this command.");
+        return;
+    }
+    let existingRoles = (await msg.guild.roles.fetch()).cache.array();
+    existingRoles = existingRoles.filter(role => role.client.user.id == bot.user.id && role.name.startsWith(rolePrefix));
+    msg.channel.send("⌛ Deleting all Rainbow Roles. This may take a moment...");
+    try {
+        await Promise.all(
+            existingRoles.map(role => role.delete("Rainbow Roles cleanup command"))
+        );
+    } catch(e) {
+        console.error(e);
+        msg.channel.send("❌ Could not delete roles. Try again later.");
+        return;
+    }
+    msg.channel.send("✅ Done!");
+}
+
 function memberSortLambda(a, b, respectHoists){
     if(respectHoists){
         const highestA = a.roles.hoist == null ? 0 : a.roles.hoist.position;
@@ -211,6 +262,11 @@ async function fetchGuildData(serverId){
         return null;
     }
     if(doc.exists){
+        const oldData = doc.data();
+        const didNeedPatching = await patchData(serverId, oldData);
+        if(didNeedPatching) {
+            return await fetchGuildData(serverId);
+        }
         return doc.data();
     } else {
         try {
@@ -223,18 +279,27 @@ async function fetchGuildData(serverId){
     }
 }
 
+async function patchData(serverId, oldData){
+    const updateData = {};
+    if(oldData.colorSaturation === undefined) updateData.colorSaturation = 1;
+    if(oldData.colorValue === undefined) updateData.colorValue = 1;
+    if(oldData.colorHueStart === undefined) updateData.colorHueStart = 0;
+    if(oldData.colorHueEnd === undefined) updateData.colorHueEnd = 1;
+    if(oldData.respectHoists === undefined) updateData.respectHoists = true;
+    if(oldData.includeBots === undefined) updateData.includeBots = true;
+    if(oldData.maxRoleCount === undefined) updateData.maxRoleCount = 0;
+    if(Object.keys(updateData).length === 0) return false;
+    console.log("Patching server " + serverId + ": " + JSON.stringify(updateData));
+    await updateGuildData(serverId, updateData);
+    return true;
+}
+
 async function updateGuildData(serverId, updateData){
     try {
         await firestore.collection("guilds").doc(serverId).update(updateData);
     } catch(e) {
         if(e.code == 5){ // NOT_FOUND
-            await firestore.collection("guilds").doc(serverId).set({
-                colorSaturation: 1,
-                colorValue: 1,
-                respectHoists: true,
-                includeBots: true,
-                maxRoleCount: 0
-            });
+            await firestore.collection("guilds").doc(serverId).set(defaultData);
             return updateGuildData(serverId, updateData);
         }
         console.error(e);
